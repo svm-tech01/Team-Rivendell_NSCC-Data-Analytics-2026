@@ -404,7 +404,6 @@ The repository deliberately avoids hard-coding unpublished final numbers until t
 
 **National Students' Space Challenge 2026 — Data Analytics**
 
-- **Rahul Ganguly**
 - **Sagnik Mitra**
 - **Suvam Kar**
 
@@ -422,14 +421,41 @@ The project follows the competition constraint of building the representation-le
 
 ## Citation / Reference
 
-If this repository is used or referenced, please cite the project as:
+References and External Sources
+
+The following sources support the established background methods, instrumentation, and software used in this repository:
+
 
 ```text
-Team Rivendell.
-Unsupervised Anomaly Detection in Mars HiRISE Orbital Imagery.
-National Students' Space Challenge 2026 — Data Analytics.
-2026.
+NASA — Mars Reconnaissance Orbiter Science Instruments / HiRISE.
+https://science.nasa.gov/mission/mars-reconnaissance-orbiter/science-instruments/
+
+NASA Planetary Data System — Mars Reconnaissance Orbiter HiRISE instrument context.
+https://pds.nasa.gov/ds-view/pds/viewContext.jsp?identifier=urn%3Anasa%3Apds%3Acontext%3Ainstrument%3Ahirise.mro&version=1.2
+
+Liu, F. T., Ting, K. M., & Zhou, Z.-H. (2008). Isolation Forest. 2008 Eighth IEEE International Conference on Data Mining.
+https://doi.org/10.1109/ICDM.2008.17
+
+Wang, Z., Bovik, A. C., Sheikh, H. R., & Simoncelli, E. P. (2004). Image quality assessment: From error visibility to structural similarity. IEEE Transactions on Image Processing, 13(4), 600–612.
+https://doi.org/10.1109/TIP.2003.819861
+
+van der Maaten, L., & Hinton, G. (2008). Visualizing Data using t-SNE. Journal of Machine Learning Research, 9, 2579–2605.
+https://www.jmlr.org/papers/v9/vandermaaten08a.html
+
+McInnes, L., Healy, J., Saul, N., & Großberger, L. (2018). UMAP: Uniform Manifold Approximation and Projection. Journal of Open Source Software, 3(29), 861.
+https://doi.org/10.21105/joss.00861
+
+NIST/SEMATECH e-Handbook of Statistical Methods — Median Absolute Deviation.
+https://www.itl.nist.gov/div898/handbook/eda/section3/eda356.htm
+
+PyTorch documentation — Conv2d and ConvTranspose2d.
+https://docs.pytorch.org/docs/main/generated/torch.nn.Conv2d.html
+https://docs.pytorch.org/docs/stable/generated/torch.nn.ConvTranspose2d.html
+
+scikit-learn documentation — IsolationForest.
+https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.IsolationForest.html
 ```
+
 
 ---
 
@@ -441,9 +467,5 @@ Large datasets, generated checkpoints, and other binary artifacts should general
 
 ---
 
-## Project Status
 
-**Status: Final submission preparation**
-
-The main analysis pipeline is complete. Before final submission, run the notebook end-to-end once more and synchronize the generated numerical results, figures, notebook, and LaTeX report.
 
