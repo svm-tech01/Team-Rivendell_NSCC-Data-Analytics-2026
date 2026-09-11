@@ -1,547 +1,449 @@
-# NSSC 2026 - HiRISE Unsupervised Anomaly Detection**
+# Team Rivendell — Mars HiRISE Unsupervised Anomaly Detection
 
-An end-to-end unsupervised anomaly detection pipeline for identifying unusual surface patterns in HiRISE image crops using convolutional autoencoders, latent-space novelty detection, statistical thresholding, and reconstruction-error analysis.
+**Team Rivendell | NSCC/NSSC 2026 — Data Analytics**
 
-## Overview**
+Repository for Team Rivendell's submission to the **National Students' Space Challenge 2026 Data Analytics challenge**, focused on unsupervised anomaly detection in Mars HiRISE orbital imagery.
 
-This project develops a fully unsupervised pipeline for detecting potentially unusual surface features in HiRISE imagery without using pretrained models or ground-truth anomaly labels.
+> **Pipeline:** HiRISE crop → convolutional autoencoder → 256-D latent space → Isolation Forest → robust threshold → anomaly candidates → reconstruction-error analysis → geological hypotheses
 
-The pipeline consists of four major stages:
+---
 
-1. Representation Learning
+## Overview
 
-   - Train convolutional autoencoders on HiRISE image crops.
+The challenge provides approximately **10,422 grayscale HiRISE image crops**, each resized to **227 × 227 pixels**, without ground-truth anomaly labels or the locations/counts of the injected anomalies.
 
-   - Compare a baseline V1 architecture with an improved V2 architecture.
-
-2. Latent-Space Novelty Detection
-
-   - Extract 256-dimensional latent representations from the final V2 model.
-
-   - Apply Isolation Forest to assign novelty scores.
-
-3. Statistical Anomaly Thresholding
-
-   - Analyze the observed novelty-score distribution.
-
-   - Compare multiple statistical thresholding approaches.
-
-   - Select the final threshold using a robust median + MAD criterion.
-
-4. Reconstruction Interpretability
-
-   - Generate pixel-wise reconstruction-error maps.
-
-   - Analyze the highest-novelty crops.
-
-   - Form cautious geological hypotheses based on observed spatial patterns.
-
-## Project Structure**
+Our approach therefore uses a completely unsupervised pipeline:
 
 ```text
+                    ┌──────────────────────┐
+                    │  227×227 HiRISE Crop │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │ V2 Convolutional     │
+                    │ Autoencoder           │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │ 256-D Latent Vector  │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │ Isolation Forest     │
+                    │ Novelty Scoring      │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │ Robust MAD Threshold │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │ Anomaly Candidates   │
+                    └──────────┬───────────┘
+                               │
+                  ┌────────────┴────────────┐
+                  ▼                         ▼
+        ┌──────────────────┐      ┌────────────────────┐
+        │ Metadata /       │      │ V2 Decoder         │
+        │ Location Analysis│      │ Reconstruction      │
+        └──────────────────┘      └─────────┬──────────┘
+                                            │
+                                            ▼
+                                  ┌────────────────────┐
+                                  │ Pixel-wise Error   │
+                                  │ Heatmaps            │
+                                  └─────────┬──────────┘
+                                            │
+                                            ▼
+                                  ┌────────────────────┐
+                                  │ Geological          │
+                                  │ Hypotheses          │
+                                  └────────────────────┘
+```
 
-NSSC-2026/
+---
 
+## Project Highlights
+
+### Deep Latent Representation
+
+We train a custom convolutional autoencoder **from scratch** using standard PyTorch layers. The pipeline does not rely on pretrained backbones, pretrained feature extractors, or transfer learning.
+
+The final V2 architecture uses:
+
+- Input: `1 × 227 × 227`
+- Latent dimension: **256**
+- Learned strided-convolution bottleneck
+- Spatial bottleneck at **8 × 8**
+- Transposed-convolution decoder
+- Learned refinement after the final resize
+
+### V1 → V2 Architecture Iteration
+
+The project was developed through explicit engineering iterations.
+
+| Version | Bottleneck | Decoder | Loss | Parameters |
+|---|---|---|---|---:|
+| V1 | `AdaptiveAvgPool2d(4,4)` | Blind bilinear resize | MSE | 3,497,153 |
+| V2 | Learned `8×8` bottleneck | Bilinear resize + learned refinement | `10×MSE + 1×(1−SSIM)` | 10,099,521 |
+
+V1 produced overly smooth reconstructions. We diagnosed the loss of high-frequency spatial information at the average-pooling bottleneck and the large blind resize in the decoder. V2 replaces this with learned downsampling and learned refinement.
+
+### Combined MSE + SSIM Loss
+
+The final training objective is:
+
+\[
+\mathcal{L}
+=
+10\,\mathrm{MSE}
++
+1(1-\mathrm{SSIM})
+\]
+
+SSIM is implemented directly in the notebook using a Gaussian-window formulation.
+
+The `10:1` weighting was selected after checking the initial scale of the loss terms:
+
+```text
+MSE       ≈ 0.0269
+1 − SSIM  ≈ 0.400
+```
+
+Without scale matching, the SSIM component would dominate the objective.
+
+### Latent-Space Visualization
+
+The final 256-D representations are qualitatively explored using:
+
+- **t-SNE**
+- **UMAP**
+
+These are used to inspect the structure of the learned representation and check for collapse or meaningful variation.
+
+The projections are treated as **qualitative diagnostics**, not as proof of geological classes.
+
+---
+
+## Unsupervised Anomaly Detection
+
+After the V2 autoencoder is finalized, a 256-dimensional latent vector is extracted for every image.
+
+Isolation Forest is then applied in latent space:
+
+```text
+Image
+  ↓
+V2 Encoder
+  ↓
+256-D latent vector
+  ↓
+Isolation Forest
+  ↓
+Novelty Score
+```
+
+The sklearn decision-function convention is converted so that:
+
+> **Higher Novelty Score = more anomalous**
+
+This allows anomaly detection to operate on the learned terrain representation rather than directly on raw image pixels.
+
+---
+
+## Data-Driven Thresholding
+
+A major part of the project is the choice of the final anomaly threshold.
+
+We compare:
+
+- Gaussian `μ + kσ`
+- Robust `median + k × MAD`
+- Elbow / curvature heuristic
+
+The score distribution is additionally examined using:
+
+- Shapiro–Wilk normality testing
+- skewness
+- sorted-score plots
+- MAD sensitivity sweeps
+- kernel density estimation (KDE)
+
+An initial `median + 3×MAD` threshold flagged roughly **18–22%** of the dataset, which was inconsistent with the expected rarity of challenge outliers.
+
+The final method uses:
+
+\[
+T = \mathrm{median}(\mathrm{score}) + 6\times\mathrm{MAD}(\mathrm{score})
+\]
+
+The `k = 6.0` threshold was selected because it lies beyond the apparent secondary mode and in the thinning upper tail of the observed novelty-score distribution.
+
+This is described as a **data-driven robust threshold**, not as a universally valid statistical cutoff.
+
+The Isolation Forest `contamination` value is retained as a fitting parameter, but the final reported anomaly count is determined by the selected threshold rather than by taking a fixed top-N count.
+
+---
+
+## Reconstruction Interpretability
+
+The highest-scoring images that pass the anomaly threshold are sent through the same V2 decoder.
+
+For each selected anomaly we examine:
+
+1. Original crop
+2. Reconstructed crop
+3. Pixel-wise squared reconstruction error
+4. Interior/background-excluded error
+
+This gives a spatial view of the regions responsible for the unusual representation.
+
+A high reconstruction error should **not** automatically be interpreted as proof of a geological anomaly. Possible causes include unusual terrain, sensor artifacts, domain shift, splicing, illumination differences, masking, and crop-boundary effects.
+
+---
+
+## Metadata and Location Analysis
+
+Detected crops are linked back to their source-image metadata.
+
+The analysis can therefore examine:
+
+- latitude
+- longitude
+- sun angle
+- season
+- image resolution
+- source image ID
+
+This allows us to test whether detected anomalies are associated with acquisition conditions rather than assuming that every detection has a geological explanation.
+
+An optional metadata-fusion experiment is also included in the notebook.
+
+---
+
+## Geological Interpretation
+
+The final stage converts the strongest detections into **physically grounded hypotheses**.
+
+These are deliberately written as hypotheses rather than confirmed classifications.
+
+For example:
+
+- Error concentrated along a sharp boundary may be consistent with an unfamiliar terrain feature, a splice, or a crop discontinuity.
+- Diffuse error across much of a frame may be consistent with a sensor artifact or domain-shifted content.
+
+The reconstruction maps are therefore used to support interpretation, while keeping the distinction between **machine-detected novelty** and **confirmed geological discovery** explicit.
+
+---
+
+## Repository Structure
+
+The intended GitHub repository structure is:
+
+```text
+Team-Rivendell_NSCC-Data-Analytics-2026/
 │
-
 ├── README.md
-
+├── NSSC_2026_FINAL.ipynb
 │
-
-├── notebook/
-
-│   └── NSSC_2026_Merged_fixed.ipynb
-
-│
-
 ├── report/
-
-│   └── Final_Report.pdf
-
+│   ├── report.tex
+│   ├── NSSC_2026_Report.pdf
+│   └── CHANGELOG.pdf
 │
-
-├── changelog/
-
-│   └── Engineering_Changelog.md
-
-│
-
-├── src/
-
-│   ├── model_v1.py
-
-│   ├── model_v2.py
-
-│   ├── model_v3.py
-
-│   └── other_required_code.py
-
-│
-
 ├── results/
-
-│   ├── figures/
-
-│   │   ├── top5_reconstruction_analysis.png
-
-│   │   ├── top5_clean_error_heatmaps.png
-
-│   │   ├── umap_anomaly_overlay.png
-
-│   │   ├── threshold_diagnostics.png
-
-│   │   └── novelty_score_kde.png
-
-│   │
-
-│   └── tables/
-
-│       ├── novelty_scores.csv
-
-│       └── novelty_scores_with_metadata.csv
-
+│   ├── novelty_scores.csv
+│   ├── flagged_anomalies.csv
+│   ├── latent_space_tsne.png
+│   ├── latent_space_umap.png
+│   └── reconstruction_errors/
 │
-
-├── requirements.txt
-
+├── figures/
+│   └── report_figures/
 │
-
 └── .gitignore
+```
 
-Model Architecture
+The exact folder names can be adjusted to match the final repository contents.
 
-V1 - Baseline
+### Files currently associated with the submission
 
-V1 is the baseline convolutional autoencoder.
+| File | Purpose |
+|---|---|
+| `NSSC_2026_FINAL.ipynb` | Main end-to-end analysis notebook |
+| `report/report.tex` | LaTeX source for the technical report |
+| `report/NSSC_2026_Report.pdf` | Compiled report |
+| `report/CHANGELOG.pdf` | Engineering iteration / design journal |
+| `results/` | Generated numerical results and figures |
 
-Key characteristics:
+---
 
-Grayscale HiRISE image input
+## Reproducing the Pipeline
 
-256-dimensional latent representation
+### Environment
 
-Adaptive average pooling bottleneck
+The notebook is intended primarily for **Google Colab**.
 
-Convolutional encoder
+Recommended Python packages:
 
-Transposed-convolution decoder
+```bash
+pip install torch torchvision numpy pandas matplotlib scikit-learn scipy pillow umap-learn
+```
 
-Final bilinear resizing stage
+### Dataset and Drive
 
-MSE-only reconstruction loss
+The notebook expects the competition data and checkpoints to be accessible through Google Drive under:
 
-Trainable parameters:
+```text
+/content/drive/MyDrive/NSSC_HiRISE/
+```
 
-3,497,153
+The pipeline uses:
 
-Best validation performance:
+```text
+10,422 total images
+9,901 training images
+521 validation images
+95/5 split
+seed = 42
+```
 
-Validation MSE  : 0.003207
+### Main generated model files
 
-Validation SSIM : 0.667980
+The finalized V2 checkpoint and latent representations are:
 
-V2 - Final Autoencoder
+```text
+checkpoints/cae_final_v2_mse_ssim.pt
+checkpoints/latents_v2.npy
+checkpoints/latent_filenames_v2.json
+```
 
-V2 improves the bottleneck and reconstruction process of V1.
+The anomaly-detection phase can be reproduced from the saved latent vectors without retraining the autoencoder.
 
-The main architectural changes are:
+### Execution Order
 
-Replaces the adaptive-average-pooling bottleneck with a learned strided-convolution bottleneck.
+Run `NSSC_2026_FINAL.ipynb` from top to bottom:
 
-Reduces the spatial representation to 8 × 8.
+```text
+1. Dataset preparation
+2. V1 baseline
+3. V2 architecture
+4. V2 training/evaluation
+5. Latent extraction
+6. t-SNE / UMAP
+7. Isolation Forest
+8. Threshold analysis
+9. Metadata/location analysis
+10. Metadata fusion (optional)
+11. Top anomaly selection
+12. Reconstruction + error heatmaps
+13. Geological interpretation
+14. Final Results
+```
 
-Projects the learned representation into a 256-dimensional latent vector.
+---
 
-Uses learned convolutional refinement after the final resize operation.
+## Reproducibility Notes
 
-Uses a combined MSE + SSIM reconstruction objective.
+The pipeline uses fixed random seeds where applicable, with the primary experimental seed set to:
 
-Loss:
+```text
+42
+```
 
-Loss = 10 × MSE + 1 × (1 − SSIM)
+The latent filename index is saved alongside the latent vectors so that each vector can be matched back to its original crop.
 
-Trainable parameters:
+When publishing final numbers, the notebook outputs, report, and repository figures should all correspond to the **same final successful run**.
 
-10,099,521
+---
 
-Best validation performance:
+## Limitations
 
-Validation MSE  : 0.002164
+This project is intentionally unsupervised and therefore has several limitations:
 
-Validation SSIM : 0.708526
+- No ground-truth anomaly labels are available for direct supervised validation.
+- t-SNE and UMAP provide qualitative visualization rather than geological labels.
+- Isolation Forest identifies unusual latent representations, not necessarily scientifically important anomalies.
+- Reconstruction error is influenced by the learned representation and decoder.
+- Masking, illumination, crop boundaries, and acquisition artifacts can influence anomaly scores.
+- Geological explanations remain hypotheses until independently validated.
 
-The best validation metrics were obtained at Epoch 19 of the final 20-epoch training run.
+---
 
-Latent Representation
+## Results
 
-The final V2 encoder produces a 256-dimensional latent vector for each image crop.
+The final numerical results are generated by the notebook's **Final Results** section.
 
-For the complete dataset:
+The final submission should synchronize these values across the notebook, GitHub repository, and LaTeX report:
 
-Number of image crops : 10,422
+- final V2 validation MSE
+- final V2 validation SSIM
+- latent dimension
+- Isolation Forest settings
+- final MAD threshold
+- flagged count
+- flagged percentage
+- Top-5 filenames
+- Top-5 Novelty Scores
+- metadata/location observations
+- reconstruction-error observations
+- geological hypotheses
 
-Latent dimensions     : 256
+The repository deliberately avoids hard-coding unpublished final numbers until the final notebook run has been completed and checked.
 
-Latent matrix         : (10422, 256)
+---
 
-The latent vectors are used as the input to the unsupervised novelty detection stage.
+## Team
 
-Anomaly Detection
+### Team Rivendell
 
-Isolation Forest
+**National Students' Space Challenge 2026 — Data Analytics**
 
-The 256-dimensional latent vectors are passed to an Isolation Forest.
+- **Rahul Ganguly**
+- **Sagnik Mitra**
+- **Suvam Kar**
 
-Configuration:
+**Institution:** Institute of Radio Physics and Electronics, University of Calcutta
 
-n_estimators = 300
+---
 
-max_samples = auto
+## Competition Context
 
-contamination = 0.05
+This repository contains the team's technical implementation, experiment record, visualizations, and report for the **2026 Data Analytics challenge**.
 
-The contamination parameter is used by Isolation Forest during model fitting. It is not used to determine the final anomaly count.
+The project follows the competition constraint of building the representation-learning pipeline without pretrained models or pretrained feature extractors.
 
-The Isolation Forest decision scores are sign-flipped so that:
+---
 
-Higher novelty score = More anomalous
+## Citation / Reference
 
-The resulting scores are stored in:
+If this repository is used or referenced, please cite the project as:
 
-results/tables/novelty_scores.csv
+```text
+Team Rivendell.
+Unsupervised Anomaly Detection in Mars HiRISE Orbital Imagery.
+National Students' Space Challenge 2026 — Data Analytics.
+2026.
+```
 
-Statistical Thresholding
+---
 
-Instead of directly accepting the Isolation Forest contamination fraction as the final anomaly threshold, the observed novelty-score distribution is analyzed statistically.
+## Data and Model Artifacts
 
-Candidate approaches include:
+Competition-provided imagery and other restricted artifacts should only be redistributed when permitted by the competition organizers.
 
-Gaussian mean + standard deviation
+Large datasets, generated checkpoints, and other binary artifacts should generally be kept out of Git history unless they are explicitly required and permitted.
 
-Robust median + MAD
+---
 
-Elbow/curvature analysis of sorted scores
+## Project Status
 
-The final threshold is based on a robust median + MAD criterion:
+**Status: Final submission preparation**
 
-Final Threshold = Median Score + 6 × MAD
+The main analysis pipeline is complete. Before final submission, run the notebook end-to-end once more and synchronize the generated numerical results, figures, notebook, and LaTeX report.
 
-This approach is intended to reduce sensitivity to skewed score distributions and extreme values.
-
-The corresponding diagnostic figures are stored in:
-
-results/figures/threshold_diagnostics.png
-
-results/figures/novelty_score_kde.png
-
-Top Anomalies
-
-The highest-novelty crops from the final analysis are:
-
-Rank    Image   Novelty Score
-
-1   sample_01724.jpg    0.091290
-
-2   sample_03876.jpg    0.084111
-
-3   sample_00380.jpg    0.081736
-
-4   sample_10097.jpg    0.081202
-
-5   sample_07798.jpg    0.076856
-
-These crops are subsequently analyzed using reconstruction-error heatmaps.
-
-Reconstruction Interpretability
-
-For high-novelty crops, the V2 decoder reconstructs the original image.
-
-The pixel-wise reconstruction error is calculated as:
-
-Error(x,y) = (Original(x,y) - Reconstruction(x,y))²
-
-The resulting error maps highlight regions that the learned reconstruction model has difficulty representing.
-
-Full Reconstruction Analysis
-
-results/figures/top5_reconstruction_analysis.png
-
-Shows:
-
-Original crop
-
-V2 reconstruction
-
-Reconstruction-error heatmap
-
-Interior-Only Error Analysis
-
-results/figures/top5_clean_error_heatmaps.png
-
-This analysis reduces the influence of invalid/background boundary regions and provides a cleaner view of the spatial distribution of reconstruction error.
-
-Geological Interpretation
-
-The reconstruction-error maps are used to formulate hypotheses rather than definitive geological classifications.
-
-Examples of potentially relevant patterns include:
-
-Elongated linear structures
-
-Curved boundaries
-
-Parallel bands
-
-Localized high-error regions
-
-Abrupt transitions between surface textures
-
-Possible interpretations include:
-
-Ridges
-
-Troughs
-
-Scarps
-
-Dunes or grooves
-
-Layered surface structures
-
-Lineament-like features
-
-Localized terrain-texture variations
-
-Imaging geometry, illumination, crop boundaries, and reconstruction artifacts can also produce elevated error. Therefore, geological interpretations are treated as hypotheses requiring further investigation.
-
-Metadata Analysis
-
-Flagged crops are joined with source-image metadata using the image/source mapping.
-
-The metadata-enriched results are stored in:
-
-results/tables/novelty_scores_with_metadata.csv
-
-Relevant metadata can include:
-
-Source image ID
-
-Latitude
-
-Longitude
-
-Sun angle
-
-Season
-
-Image resolution
-
-This allows the detected anomalies to be examined for possible relationships with acquisition conditions and spatial location.
-
-Visualizations
-
-The project produces several diagnostic figures.
-
-UMAP Latent-Space Visualization
-
-umap_anomaly_overlay.png
-
-Shows the distribution of latent representations and the locations of detected anomalies within the latent space.
-
-Novelty Score Distribution
-
-novelty_score_kde.png
-
-Visualizes the observed novelty-score distribution.
-
-Threshold Diagnostics
-
-threshold_diagnostics.png
-
-Provides statistical diagnostics used in selecting the final threshold.
-
-Reconstruction Analysis
-
-top5_reconstruction_analysis.png
-
-Shows original images, reconstructions, and reconstruction-error maps for the highest-novelty candidates.
-
-Clean Error Heatmaps
-
-top5_clean_error_heatmaps.png
-
-Shows interior-focused reconstruction-error maps after reducing boundary/background influence.
-
-Reproducibility
-
-The main experimental workflow is contained in:
-
-notebook/NSSC_2026_Merged_fixed.ipynb
-
-The source implementations are provided separately under:
-
-src/
-
-The main saved latent representation is:
-
-latents_v2.npy
-
-with the corresponding filename mapping:
-
-latent_filenames_v2.json
-
-The notebook records the training configuration, anomaly detection parameters, thresholding procedure, and generated outputs.
-
-Requirements
-
-Install the required Python packages using:
-
-pip install -r requirements.txt
-
-The project uses common scientific Python and deep-learning libraries including:
-
-PyTorch
-
-NumPy
-
-Pandas
-
-SciPy
-
-scikit-learn
-
-Matplotlib
-
-UMAP
-
-Pillow
-
-Running the Project
-
-The complete workflow can be executed from the Jupyter notebook:
-
-notebook/NSSC_2026_Merged_fixed.ipynb
-
-The general execution flow is:
-
-HiRISE Images
-
-      │
-
-      ▼
-
-Preprocessing
-
-      │
-
-      ▼
-
-V1 Baseline Autoencoder
-
-      │
-
-      ▼
-
-V2 Improved Autoencoder
-
-      │
-
-      ▼
-
-256-D Latent Representations
-
-      │
-
-      ▼
-
-Isolation Forest
-
-      │
-
-      ▼
-
-Novelty Scores
-
-      │
-
-      ▼
-
-Statistical Thresholding
-
-      │
-
-      ▼
-
-Flagged Anomalies
-
-      │
-
-      ▼
-
-V2 Reconstruction
-
-      │
-
-      ▼
-
-Pixel-wise Error Maps
-
-      │
-
-      ▼
-
-Geological Hypotheses
-
-Results
-
-The final V2 model improves reconstruction quality over the V1 baseline:
-
-V1 → MSE 0.003207 | SSIM 0.667980
-
-V2 → MSE 0.002164 | SSIM 0.708526
-
-The final latent space contains:
-
-10,422 samples × 256 dimensions
-
-The anomaly detection stage identifies high-novelty candidates without requiring labelled anomalies or a pretrained classifier.
-
-Limitations
-
-The detected anomalies should not automatically be interpreted as confirmed geological discoveries.
-
-Potential sources of false positives include:
-
-Image boundaries
-
-Illumination variations
-
-Viewing geometry
-
-Acquisition artifacts
-
-Unusual but non-geological textures
-
-Reconstruction-model limitations
-
-The geological interpretations in this project are therefore presented as hypotheses based on the spatial structure of reconstruction errors.
-
-Project Deliverables
-
-The repository contains the major project deliverables:
-
-Notebook: Complete experimental workflow
-
-Report: Detailed methodology, results, figures, thresholds, and interpretations
-
-Engineering Changelog: Evolution of the model architecture and design decisions
-
-Source Code: V1, V2, V3 and supporting utilities
-
-Results: Generated figures and numerical result tables
-
-Authors
-
-Suvam Kar , Sagnik Mitra
-
-HiRISE Unsupervised Anomaly Detection Project
